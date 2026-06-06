@@ -1,66 +1,76 @@
 /**
- * Library Storage Manager
- * In-memory storage for knowledge libraries
+ * Library Storage Manager - Persistent with SQLite using better-sqlite3
  */
-
 import { KnowledgeLibrary } from './gravitational.js';
+import Database from 'better-sqlite3';
 
 class LibraryStorage {
-  private libraries: Map<string, KnowledgeLibrary>;
+  private db: Database.Database;
+  private dbPath: string;
   
-  constructor() {
-    this.libraries = new Map();
+  constructor(dbPath: string = './ai-books.db') {
+    this.dbPath = dbPath;
+    this.db = new Database(dbPath);
+    this.initDb();
   }
   
-  /**
-   * Save a library
-   */
+  private initDb() {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS libraries (
+        name TEXT PRIMARY KEY,
+        data TEXT NOT NULL,
+        created_at TEXT,
+        updated_at TEXT
+      );
+    `);
+  }
+  
   save(library: KnowledgeLibrary): void {
-    this.libraries.set(library.name, library);
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO libraries (name, data, created_at, updated_at)
+      VALUES (?, ?, ?, DATETIME('now'))
+    `);
+    stmt.run(
+      library.name,
+      JSON.stringify(library),
+      library.created_at
+    );
   }
   
-  /**
-   * Get a library by name
-   */
   get(name: string): KnowledgeLibrary | undefined {
-    return this.libraries.get(name);
+    const stmt = this.db.prepare('SELECT data FROM libraries WHERE name = ?');
+    const row = stmt.get(name) as any;
+    if (!row) return undefined;
+    return JSON.parse(row.data);
   }
   
-  /**
-   * Check if library exists
-   */
   exists(name: string): boolean {
-    return this.libraries.has(name);
+    const stmt = this.db.prepare('SELECT 1 FROM libraries WHERE name = ?');
+    return !!stmt.get(name);
   }
   
-  /**
-   * Delete a library
-   */
   delete(name: string): boolean {
-    return this.libraries.delete(name);
+    const stmt = this.db.prepare('DELETE FROM libraries WHERE name = ?');
+    const result = stmt.run(name);
+    return result.changes > 0;
   }
   
-  /**
-   * List all libraries
-   */
   list(): KnowledgeLibrary[] {
-    return Array.from(this.libraries.values());
+    const stmt = this.db.prepare('SELECT data FROM libraries');
+    const rows = stmt.all() as any[];
+    return rows.map(row => JSON.parse(row.data));
   }
   
-  /**
-   * Get total count
-   */
   count(): number {
-    return this.libraries.size;
+    const stmt = this.db.prepare('SELECT COUNT(*) as count FROM libraries');
+    const row = stmt.get() as any;
+    return row.count;
   }
   
-  /**
-   * Clear all libraries
-   */
   clear(): void {
-    this.libraries.clear();
+    this.db.exec('DELETE FROM libraries');
   }
 }
 
-// Singleton instance
+// Singleton
 export const libraryStorage = new LibraryStorage();
